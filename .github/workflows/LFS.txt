@@ -1,0 +1,98 @@
+#
+# EMC 410197 - Combustion chemical kinetics  - Detailed kinetics mechanisms and thermodynamic databases
+#
+# Prof. Leonel R Cancino
+# LFF => Laminar Flat Flame - Free Flame
+# File adapted from https://cantera.org/examples/jupyter/index.html 
+#
+import cantera as ct
+import time
+import matplotlib.pylab as plt
+import numpy as np
+import csv
+#
+plt.rcParams['axes.labelsize'] = 14
+plt.rcParams['xtick.labelsize'] = 12
+plt.rcParams['ytick.labelsize'] = 12
+plt.rcParams['legend.fontsize'] = 10
+plt.rcParams['figure.figsize'] = (8,6)
+#
+plt.style.use('seaborn-whitegrid')
+plt.rcParams['figure.autolayout'] = True
+# Import Pandas for DataFrames
+#
+################### Simulation conditions - Inputs #################################
+Temp = 300                             # Mixture gas temperature [K]
+Pressure = 20.265                # Pressure [bar]
+Mechanism = '2LSfFS20K20C5-isomers-C3NUIG-mech.cti'            # Detailed kinetics model
+fuel = 'CH4'                              # Fuel
+oxidant = {'O2':1.0, 'N2':3.76}           # Oxidant
+phi = [ 1.100, 1.197, 1.301, 1.403 ] 
+#phi_mix = 1.0                        # phi
+length = len(phi) 
+for i in range(length):
+    
+    phi_mix=phi[i]
+    #
+    loglevel = 1                              # Define logging level 
+    width = 0.014                             # Domain width in metres
+    #
+    print('******************************************************************************')
+    print(' ')
+    print("Running Cantera version: {}".format(ct.__version__))
+    print(' ')
+    # LFF => Laminar Flat Flame simulation
+    print('******************************************************************************')
+    print(' ')
+    print('LFF => Laminar Flat Flame simulation - Free Flame')
+    print(' ')
+    print('********************************************************************************')
+    print('     ')
+    print('Running condition => ', fuel, '+', oxidant, ' phi = ',  phi_mix, ',', Pressure, ' bar, ', Temp, 'K')
+    print('Detailed Kinetics model =', Mechanism)
+    print('     ')
+    #
+    tic = time.time()
+    #
+    To = Temp
+    Po = Pressure*ct.one_atm  # Pressure [atm]
+    #
+    #Define the gas-mixutre and kinetics
+    gas = ct.Solution(Mechanism)
+    #
+    # Create a premixed mixture 
+    #gas.set_equivalence_ratio(phi_mix, 'CH4', {'O2':1.0, 'N2':3.76})
+    gas.set_equivalence_ratio(phi_mix, fuel, oxidant)
+    gas.TP = To, Po
+    #
+    # Create the flame object
+    flame = ct.FreeFlame(gas, width=width)
+    #
+    # Define tolerances for the solver
+    flame.set_refine_criteria(ratio=3.0, slope=0.2, curve=0.2)
+    #
+    flame.solve(loglevel=loglevel, auto=True)
+    Su0 = flame.u[0]
+    print('******************************************************************************')
+    print(' ')
+    print("Flame Speed is: {:.2f} cm/s".format(Su0*100))
+    toc = time.time()
+    print(' ')
+    print('Simulation took {:3.2f} s to compute'.format(toc-tic))
+    print(' ')
+    print('******************************************************************************')
+    #
+    with open("Results.txt", "a") as Output: 
+        Output.write('******************************************************************************\n')
+        Output.write('LFF => Laminar Flat Flame simulation - Free Flame\n')
+        Output.write('Detailed Kinetics model ='+  str(Mechanism) +'\n')
+        Output.write('Running condition => '+  str(fuel)+'+'+  str(oxidant)+ ' phi = '+  str(phi_mix)+ ','+  str(Pressure) +' bar, '+  str(Temp) + 'K\n')
+        Output.write("Flame Speed is: {:.2f} cm/s".format(Su0*100)+'\n')
+        Output.write('Simulation took {:3.2f} s to compute'.format(toc-tic)+'\n')
+        Output.write('******************************************************************************\n')
+    Output.close()
+    file_LST = open('Results-LSF.csv', 'a', newline='')
+    writer = csv.writer(file_LST)
+    writer.writerow([Su0*100])
+    file_LST.close()
+                                   	

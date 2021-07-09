@@ -1,0 +1,199 @@
+"""
+Ignition delay time at constant volume reactor.
+
+	Prof. LRCancino, 
+	leonel.cancino@labmci.ufsc.br
+	http://labmci.ufsc.br/ 
+	
+"""
+from datetime import datetime 
+start_time = datetime.now() 
+#
+import cantera as ct
+import numpy as np
+import csv
+import matplotlib.pyplot as plt
+#
+# Initial condition -
+#
+
+i=0
+for T in range(1300, 1400+25, 25):
+
+    i=i+1
+    Mix	,	Mix_phi	,	phi	,	pressure	,	Temp	,	run	=	'(2.67% C2H6 + 12% O2 + 85.33% Ar)'	,	'C3H6:0.0267,O2:0.012,AR:0.9613'	,	1.0	,	10	,	T	,	'RUN_03'
+
+    #
+    print('********************************************************************************')
+    print('     ')
+    print('Running condition => ', Mix )
+    print('                      phi = ',  phi, ',', pressure*1.01325, ' bar, ', Temp, 'K')
+    print('                     ',  run)
+    print('     ')
+    #
+    mechanism = '2LSfFS20K20C5-isomers-C3NUIG-mech.cti'
+    mechanism2 = '2LSfFS20K20C5-isomers-C3NUIG-mech.cti'
+    #
+    gas = ct.Solution(mechanism)
+    initial_state = Temp, (pressure/1.0)*ct.one_atm, Mix_phi
+    #
+    sim_time_microsecons = 500000                    # Simulation time - initial guest (micro-s)
+    #
+    # Run the simulation 
+    gas.TPX = initial_state
+    r = ct.Reactor(gas)
+    sim = ct.ReactorNet([r])
+    #
+    sim_time = sim_time_microsecons / 1000000        # Simulation time - initial guest (s)
+    #
+    datatest = np.zeros((100000, 4))
+    datatest2 = np.zeros((100000, 4))
+    gradient = []
+    counter = 0
+    t = 0.0
+    while t < sim_time:
+        counter = counter + 1
+        t = sim.step()
+        datatest[counter-1,0] = t                                       # simulation timestep
+        datatest[counter-1,1] = r.thermo.X[gas.species_index('OH*')]     # OH* mass fraction
+    #
+    max_OH_star=0
+    IDT_mech = 0
+    for ii in range(0,counter):
+        if datatest[ii,1] > max_OH_star:
+            max_OH_star = datatest[ii,1]                                 # Maximum OH* mass fraction
+            IDT_mech = datatest[ii,0]                                    # IDT  (sec)
+    #
+    counter2 = 0
+    index_for_ignition = 0
+    while counter2 < counter - 2:
+        counter2 = counter2 + 1
+        datatest[counter2-1,2]=(datatest[counter2,1] - datatest[counter2-1,1])/(datatest[counter2,0] - datatest[counter2-1,0])
+        datatest[counter2-1,3]=(datatest[counter2-1,1]/max_OH_star)*100
+        if (datatest[counter2-1,3] == 100):
+            index_for_ignition = 1
+    #
+    OH_star_peak = 0
+    counter2 = 0
+    while counter2 < counter - 2:
+        counter2 = counter2 + 1
+        if ((datatest[counter2-1,2] > 0) and (datatest[counter2,2] < 0) and (index_for_ignition == 1) and (datatest[counter2,0] <= IDT_mech)):
+            OH_star_peak = OH_star_peak + 1
+            print('OH* =', OH_star_peak, 'at time = ',datatest[counter2,0]*1e6, '[micro-s]', 'with ',datatest[counter2,3], '% of OH* max')
+    #
+    print('OH* =', OH_star_peak)
+    if (index_for_ignition == 0):
+        print('No ignition detected over simulation time / kinetics model conditions')
+    else:
+        print('Full mech - maximum OH fraction = ', max_OH_star)
+        print('Full mech IDT = ', IDT_mech*1e6, '[micro-s]')
+        print('number of timesteps =', counter)
+        print('approximate delta(time) in the simulation =', (sim_time_microsecons)/counter, '[micro-s]')
+        print('     ')
+    
+    time_elapsed = datetime.now() - start_time 
+    print('Time elapsed in this run (hh:mm:ss.ms) {}'.format(time_elapsed))
+    #
+    with open("Results.txt", "a") as Output:
+    # Species and reactions information
+        Output.write('******************************************************************************\n')
+        Output.write(' \n')
+        Output.write(' Initial Condition : \n')
+        Output.write(' Mixture = {0}, phi = {1} \n'.format(Mix, phi))
+        Output.write(' pressure = {0} [bar] , Temperature = {1} [K] \n'.format(pressure*1.01325, Temp))
+        Output.write(' \n'
+    		'****** Kinetics database ***************************************************** \n'
+                    ' \n'
+    		' Mechanism = {0} \n'.format(mechanism))
+        Output.write(' Species = {0}, Reactions = {1} \n'.format(gas.n_species, gas.n_reactions))
+        Output.write(' \n'
+                    '****** Ignition data     ***************************************************** \n')
+        Output.write(' \n')
+        OH_star_peak2 = 0
+        counter2 = 0
+        while counter2 < counter - 2:
+            counter2 = counter2 + 1
+            if ((datatest[counter2-1,2] > 0) and (datatest[counter2,2] < 0) and (index_for_ignition == 1) and (datatest[counter2,0] <= IDT_mech) and (OH_star_peak > 1)):
+                OH_star_peak2 = OH_star_peak2 + 1
+                Output.write(' More than one peak of OH* was detected along the simulation process... \n')
+                Output.write(' Please check OH* profile for cool flame, pre-ignition or NTC behaviour. \n')
+                Output.write(' \n')
+                Output.write(' OH* = {0} \n'.format(OH_star_peak2))
+                Output.write('    OH* at time = {0} [micro-s] \n'.format(datatest[counter2,0]*1e6))
+                Output.write('    % of OH* max = {0} \n'.format(datatest[counter2,3]))
+                Output.write(' \n')
+                Output.write(' \n')
+    #            
+        if (index_for_ignition == 0):
+            Output.write(' No ignition detected over simulation time / kinetics model conditions \n')
+        else:
+            Output.write(' \n')
+            Output.write(' Maximum OH* fraction = {0} \n'.format(max_OH_star))
+            Output.write(' Ignition delay time = {0} [micro-s] at 100% of max OH \n'.format(IDT_mech*1e6))
+            Output.write(' number of timesteps == {0} \n'.format(counter))
+    #
+        Output.write(' \n')
+        Output.write('******************************************************************************\n')
+        Output.write(' Time elapsed in this run {0} [hh:mm:ss.ms] \n'.format(time_elapsed))
+        Output.write('******************************************************************************\n')
+        Output.write('***#######################################################################****\n')
+        Output.write('******************************************************************************\n')
+    	
+    Output.close()
+    
+    file_IDT = open('Results-IDT.csv', 'a', newline='')
+    writer = csv.writer(file_IDT)
+    if (index_for_ignition == 0):
+        writer.writerow([phi, pressure, Temp, 0.0])
+    else:
+    #    writer = csv.writer(file_IDT)
+        writer.writerow([phi, pressure, Temp, IDT_mech*1e6])
+    file_IDT.close()
+    #
+    # set for figure Temp vrs time
+    #
+    if (index_for_ignition == 1):
+        sim_time_2 = IDT_mech*1.15
+        gas2 = ct.Solution(mechanism2)
+        gas2.TPX = initial_state
+        r2 = ct.Reactor(gas2)
+        sim2 = ct.ReactorNet([r2])
+    #
+        tt = []
+        TT = []
+        TT2 = []
+        TT3 = []
+        t2 = 0.0
+        while t2 < sim_time_2:
+            t2 = sim2.step()
+            tt.append(1000* t2)
+            TT.append(r2.thermo.X[gas2.species_index('OH*')])
+            TT2.append(r2.thermo.X[gas2.species_index('CH*')])
+    
+        #
+        fig, ax1 = plt.subplots()
+        plt.title(' Constant volume reactor simulation \n'
+                  ' Solver: CANTERA 2.4.0 \n'
+                  ' *** Initial Condition => {0} ***\n'
+                  ' Mixture = {1},  phi = {2} \n pressure = {3} bar, Temperature = {4} K \n Kinetics model: {5} \n'.format(run, Mix, phi, pressure*1.01325, Temp, mechanism))
+        plt.xlim(0, sim_time_2*1000)
+        color = 'tab:red'
+        ax1 = plt.gca()
+        ax1.axhline(linewidth=1.0, linestyle='-.', color='k')
+        ax1.set_xlabel('Time (ms)')
+        ax1.set_ylabel('OH* mole fraction', color=color)
+        ax1.plot(tt,TT, color=color, lw=1)
+        ax1.tick_params(axis='y', labelcolor=color)
+    #
+        ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+    #
+        color = 'tab:blue'
+        ax2.set_ylabel('CH* mole fraction', color=color)  # we already handled the x-label with ax1
+        ax2.plot(tt,TT2, color=color, lw=1)
+        ax2.tick_params(axis='y', labelcolor=color)
+    #
+        fig.tight_layout()  # otherwise the right y-label is slightly clipped
+    #
+        plt.savefig('Graph_'+str(i)+'_OH-CH-star_'+run+'.pdf')
+        plt.savefig('Graph_'+str(i)+'_OH-CH-star_'+run+'.png')
+       

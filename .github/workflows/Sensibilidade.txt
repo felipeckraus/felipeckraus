@@ -1,0 +1,481 @@
+#
+# Prof. Leonel R Cancino
+#
+# Brute-force sensitivity analysis - BFSA / CVReactor
+# IDT => Ignition delay time
+# File adapted from https://cantera.org/examples/
+#
+from datetime import datetime 
+start_time = datetime.now() 
+#
+import openpyxl
+import csv
+import cantera as ct
+import numpy as np
+import time
+import matplotlib.pylab as plt
+from sklearn import preprocessing
+import pandas as pd
+#
+plt.rcParams['axes.labelsize'] = 14
+plt.rcParams['xtick.labelsize'] = 12
+plt.rcParams['ytick.labelsize'] = 12
+plt.rcParams['legend.fontsize'] = 10
+plt.rcParams['figure.figsize'] = (8,6)
+#
+#
+################### Simulation conditions - Inputs #################################
+Temp = 1660                               # Mixture gas temperature [K]
+pressure = 1.7                            # Pressure [atm]
+mechanism = '2LSfFS20K20C5-isomers-C3NUIG-mech.cti'                  # Detailed kinetics model      - h2o2
+phi_mix = 0.5                             # phi, just for print in labels.
+#
+loglevel = 1                              # Define logging level 
+#
+perturbation = 0.5                        # Perturbation for BFSA
+#
+e=0.55    
+#
+Mix = 'i-pentene / air - 99% argon diluted' # fuel / air muxture, just for print in labels.
+#
+Mix_phi	,	phi	,	pressure	,	Temp	=	'BC5H10:0.000625,O2:0.009375,AR:0.99'	,	0.5	,	pressure	,	Temp
+#
+
+print('******************************************************************************')
+print(' ')
+print("Running Cantera version: {}".format(ct.__version__))
+print(' ')
+print('******************************************************************************')
+print(' ')
+print('                 IDT => Constant volume reactor - IDT simulation              ')
+print(' ')
+print('                       BRUTE-FORCE SENSITIVITY ANALYSIS                       ')
+print(' ')
+print('Starting calcutation process at: {}'.format(datetime.now()))
+print('******************************************************************************')
+print('     ')
+print('Running condition => ', Mix_phi, ' phi = ',  phi)
+print('                     ', pressure, ' atm, ', Temp, 'K')
+print('     ')
+#
+gas = ct.Solution(mechanism)
+initial_state = Temp, (pressure)*ct.one_atm, Mix_phi
+sim_time_microsecons = 500000                    # Simulation time - initial guest (micro-s)
+#
+# Run the simulation
+gas.TPX = initial_state
+r = ct.Reactor(gas)
+sim = ct.ReactorNet([r])
+#
+#
+sim_time = sim_time_microsecons / 1000000  # Simulation time - initial guest (s)
+#
+datatest = np.zeros((100000, 4))
+counter = 0
+t = 0.0
+t_plots = []      # Array for time
+t_a = []          # Array for time
+T_a = []          # Array for Temperature
+S1_a = []         # Array for target specie 1
+S2_a = []         # Array for target specie 2
+S3_a = []         # Array for target specie 3
+S4_a = []         # Array for target specie 4
+t2 = 0.0
+while t < sim_time:
+    counter = counter + 1
+    t = sim.step()                                                  # simulation timestep
+    datatest[counter-1,0] = t                                       # simulation timestep
+    datatest[counter-1,1] = r.thermo.X[gas.species_index('OH*')]     # target specie 1 = OH*
+    t_plots.append(1000* t)                                         # Tome for plots
+    T_a.append(r.T)                                                 # Temperature
+    S1_a.append(r.thermo.X[gas.species_index('OH*')])                # target specie 1 = OH*
+    S2_a.append(r.thermo.X[gas.species_index('OH')])                 # target specie 2 = OH
+    S3_a.append(r.thermo.X[gas.species_index('H')])                 # target specie 3 = H
+#
+max_OH=0
+IDT_mech = 0
+for ii in range(0,counter):
+    if datatest[ii,1] > max_OH:
+        max_OH = datatest[ii,1]                                      # Maximum OH mass fraction
+        IDT_mech = datatest[ii,0]                                    # IDT  (sec)
+        test_idt = datatest[ii,0]
+#
+counter2 = 0
+index_for_ignition = 0
+while counter2 < counter - 2:
+    counter2 = counter2 + 1
+    datatest[counter2-1,2]=(datatest[counter2,1] - datatest[counter2-1,1])/(datatest[counter2,0] - datatest[counter2-1,0])
+    datatest[counter2-1,3]=(datatest[counter2-1,1]/max_OH)*100
+    if (datatest[counter2-1,3] == 100):
+        index_for_ignition = 1
+#
+OH_peak = 0
+counter2 = 0
+while counter2 < counter - 2:
+    counter2 = counter2 + 1
+    if ((datatest[counter2-1,2] > 0) and (datatest[counter2,2] < 0) and (index_for_ignition == 1) and (datatest[counter2,0] <= IDT_mech)):
+        OH_peak = OH_peak + 1
+        print('OH_peak # {0} at time {1:10.3f} [micro-s] with {2} % of OH max'.format(OH_peak, datatest[counter2,0]*1e6, datatest[counter2,3]))
+#
+print('Number of OH peaks =', OH_peak)
+if ( OH_peak > 1):
+    print('     ')
+    print('******************************************************************************')
+    print('*******************************   ATTENTION   ********************************')
+    print('     ')
+    print('More than one peak of OH was detected along the simulation process... ')
+    print('Please check OH profile for cool flame, pre-ignition or NTC behaviour. ')
+
+if (index_for_ignition == 0):
+    print('No ignition detected over simulation time / kinetics model conditions')
+else:
+    print('     ')
+    print('Maximum OH fraction = {:10.5e} '.format(max_OH))
+    print('IDT = {:10.3f} [micro-s]'.format(IDT_mech*1e6))
+    print('     ')
+#
+time_elapsed = datetime.now() - start_time 
+print('Time elapsed in this run (hh:mm:ss.ms) {}'.format(time_elapsed))
+print('     ')
+#
+with open('Results_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'.txt', 'a') as Output:
+    #
+    # Species and reactions information
+    Output.write('******************************************************************************\n')
+    Output.write(' \n')
+    Output.write(' Initial Condition : \n')
+    Output.write(' Mixture = {0}, phi = {1}, pressure = {2} [atm] , Temperature = {3} [K] \n'.format(Mix, phi_mix, pressure, Temp))
+    Output.write(' \n'
+		'****** Kinetics database ***************************************************** \n'
+                ' \n'
+		' Mechanism = {0} \n'.format(mechanism))
+    Output.write(' Species = {0}, Reactions = {1} \n'.format(gas.n_species, gas.n_reactions))
+    Output.write(' \n'
+                '****** Ignition data     ***************************************************** \n')
+    Output.write(' \n')
+    OH_peak2 = 0
+    counter2 = 0
+    while counter2 < counter - 2:
+        counter2 = counter2 + 1
+        if ((datatest[counter2-1,2] > 0) and (datatest[counter2,2] < 0) and (index_for_ignition == 1) and (datatest[counter2,0] <= IDT_mech) and (OH_peak > 1)):
+            OH_peak2 = OH_peak2 + 1
+            Output.write(' More than one peak of OH was detected along the simulation process... \n')
+            Output.write(' Please check OH profile for cool flame, pre-ignition or NTC behaviour. \n')
+            Output.write(' \n')
+            Output.write(' OH_peak = {0} \n'.format(OH_peak2))
+            Output.write('    OH_peak at time = {0} [micro-s] \n'.format(datatest[counter2,0]*1e6))
+            Output.write('    % of OH max = {0} \n'.format(datatest[counter2,3]))
+            Output.write(' \n')
+            Output.write(' \n')
+    if (index_for_ignition == 0):
+        Output.write(' No ignition detected over simulation time / kinetics model conditions \n')
+    else:
+        Output.write(' \n')
+        Output.write(' Maximum OH fraction = {0} \n'.format(max_OH))
+        Output.write(' Ignition delay time = {0} [micro-s] at 100% of max OH \n'.format(IDT_mech*1e6))
+        Output.write(' number of timesteps == {0} \n'.format(counter))
+    #
+    Output.write(' \n')
+    Output.write('******************************************************************************\n')
+    Output.write(' Time elapsed in this run {0} [hh:mm:ss.ms] \n'.format(time_elapsed))
+    Output.write('******************************************************************************\n')
+    Output.write('***#######################################################################****\n')
+    Output.write('******************************************************************************\n')
+Output.close()
+#
+file_IDT = open('Results_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'.csv', 'a', newline='')
+writer = csv.writer(file_IDT)
+if (index_for_ignition == 0):
+    writer.writerow([phi_mix, pressure, Temp, 0.0])
+else:
+    writer.writerow([phi_mix, pressure, Temp, IDT_mech*1e6])
+file_IDT.close()
+#
+# Time scale for temperature and mole fraction plots => IDT_mech*1.15
+#
+sim_time_fig = IDT_mech*1.15
+#    
+plt.plot(t_plots,T_a, lw=1, color='r', label='Temperature')
+plt.xlabel('Time (ms)')
+plt.ylabel('Temperature (K)')
+plt.legend(loc='upper left')
+plt.title(' *****  Constant volume reactor simulation   ***** \n'
+        ' Solver: CANTERA {0} \n'
+        ' *** Initial Condition ***\n'
+        ' Mixture = {1},  phi = {2} \n pressure = {3} atm, Temperature = {4} K \n Kinetics model: {5} \n'
+        ' Time elapsed in this run {6} [hh:mm:ss.ms] \n'.format(ct.__version__,Mix, phi_mix, pressure, Temp, mechanism, time_elapsed))
+plt.xlim(0, sim_time_fig*1000)
+plt.tight_layout()
+plt.savefig('IDT-CVR_Temperature-vrs-time_Temp_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'.png')
+plt.savefig('IDT-CVR_Temperature-vrs-time_Temp_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'.pdf')
+#plt.show()
+    #
+    # OH and O mole fraction plot
+fig, ax1 = plt.subplots()
+plt.title(' *****  Constant volume reactor simulation   ***** \n'
+        ' Solver: CANTERA {0} \n'
+        ' *** Initial Condition ***\n'
+        ' Mixture = {1},  phi = {2} \n pressure = {3} atm, Temperature = {4} K \n Kinetics model: {5} \n'
+        ' Time elapsed in this run {6} [hh:mm:ss.ms] \n'.format(ct.__version__,Mix, phi_mix, pressure, Temp, mechanism, time_elapsed))
+plt.xlim(0, sim_time_fig*1000)
+color = 'tab:red'
+ax1 = plt.gca()
+ax1.axhline(linewidth=1.0, linestyle='-.', color='k')
+ax1.set_xlabel('Time (ms)')
+ax1.set_ylabel('OH* mole fraction', color=color)
+ax1.plot(t_plots,S1_a, label=r'$OH*$', color=color, lw=1)
+ax1.legend(loc=2)
+ax1.tick_params(axis='y', labelcolor=color)
+    #
+ax2 = ax1.twinx()  # instantiate a second axes that shares the same x-axis
+color = 'tab:blue'
+ax2.set_ylabel('OH mole fraction', color=color)  # we already handled the x-label with ax1
+ax2.plot(t_plots,S2_a, label=r'$OH$', color=color, lw=1)
+ax2.legend(loc=1)
+ax2.tick_params(axis='y', labelcolor=color)
+    #
+fig.tight_layout()  # otherwise the right y-label is slightly clipped
+    #	
+plt.savefig('IDT-CVR_OHs-OH_mole-fraction_Temp_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'.png')
+plt.savefig('IDT-CPR_OHs-OH_mole-fraction_Temp_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'.pdf')
+#plt.show()
+#
+start_time_BFSA = datetime.now()
+#
+########################## BRUTE-FORCE SENSITIVITY ANALYSIS ############################
+#
+print(' ')
+print('******************************************************************************')
+print('**********************  BRUTE-FORCE SENSITIVITY ANALYSIS  ********************')
+print(' ')
+print('Perturbation (k) = {}'.format(perturbation))
+print(' ')
+    #
+# Create dataframes to store sensitivity-analysis data
+sensitivities = pd.DataFrame(data=[], index=gas.reaction_equations(range(gas.n_reactions)))              # for plot
+sensitivities_rxr_index = pd.DataFrame(data=[], index=gas.reaction_equations(range(gas.n_reactions)))    # for exel data
+sens_backup_rxr_index = pd.DataFrame(data=[], index=gas.reaction_equations(range(gas.n_reactions)))      # for exel data - backup
+erros = pd.DataFrame(data=[], index=gas.reaction_equations(range(gas.n_reactions)))                      # for calculation of erros
+#
+#
+dk = perturbation
+#
+# Create empty columns to store the sensitivities data, reaction index and absolute sens values
+sensitivities["Sens values"] = ""                      # for plot
+sensitivities_rxr_index["Sens values"] = ""            # for exel data
+sensitivities_rxr_index["Reaction index"] = ""         # for exel data
+sensitivities_rxr_index["Abs sens value"] = ""         # for exel data
+#
+sens_backup_rxr_index["Sens values"] = ""            # for exel data - backup
+sens_backup_rxr_index["Reaction index"] = ""         # for exel data - backup
+sens_backup_rxr_index["Abs sens value"] = ""         # for exel data - backup
+#
+erros["Erros"] = ""                            # for exel data
+#
+with open('BFSA_Progress_File_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'_Perturbation='+str(perturbation)+'.txt', 'a') as Output2:
+    Output2.write(' \n')
+    Output2.write('******************************************************************************\n')
+    Output2.write(' Time and data: {}\n'.format(datetime.now()))
+    Output2.write(' \n')
+    Output2.write('**********************  BRUTE-FORCE SENSITIVITY ANALYSIS  ********************\n')
+    Output2.write(' \n')
+    Output2.write('                *****  Constant volume reactor simulation   ***** \n')
+    Output2.write('                             Solver: CANTERA {0} \n'.format(ct.__version__))
+    Output2.write(' \n')
+    Output2.write('                         *** Initial Condition ***\n')
+    Output2.write(' ------------------------------------------------------------------------------\n')
+    Output2.write(' Mixture = {0},  phi = {1} \n'.format(Mix, phi_mix))
+    Output2.write(' pressure = {0} atm, Temperature = {1} K \n'.format(pressure, Temp))
+    Output2.write(' \n')
+    Output2.write(' Kinetics model: {0} \n'.format(mechanism))
+    Output2.write(' Species = {0}, Reactions = {1} \n'.format(gas.n_species, gas.n_reactions))
+    Output2.write(' \n')
+    Output2.write('Perturbation (k) = {}\n'.format(perturbation))
+    Output2.write(' ------------------------------------------------------------------------------\n')
+    Output2.write(' \n')
+Output2.close()  
+#
+with open('Index_backup.txt') as f:
+    index_backup = int(f.read())
+f.close()
+print('****************************************************************************')
+print('index_backup {}'.format(index_backup))
+print('****************************************************************************')
+#
+index_backup = index_backup                      # index for backup
+n = 0    
+for m in range(gas.n_reactions):
+    m=m+index_backup                  # index for backup
+    n = n + 1                         # index for backup 
+    gas.set_multiplier(1.0)           # reset all multipliers                                                                     
+    gas.set_multiplier((1.0 * dk), m) # perturb reaction m
+    st_m = datetime.now()
+    print('****************************************************************************')
+    print('****************************************************************************')
+    print(' ')
+    print('Running brute-force sensitivity analysis (BFSA) ...                         ')
+    print('Time and data: {}'.format(datetime.now()))
+    print('----------------------------------------------------------------------------')
+    print(' ')
+    print('Calculating BFSA for reaction {0} of {1} reactions'.format(m+1, gas.n_reactions))
+    print(' ')
+    print('Perturbed reaction = ', gas.reaction_equation(m))
+    print(' ')
+    #
+    # Perturbed IDT calcupation
+    initial_state = Temp, (pressure)*ct.one_atm, Mix_phi
+    gas.TPX = initial_state
+    r3 = ct.Reactor(gas)
+    sim3 = ct.ReactorNet([r3])
+        #
+    datatest3 = np.zeros((100000, 4))
+    counter3 = 0
+    t3 = 0.0
+    while t3 < IDT_mech*5:
+        counter3 = counter3 + 1
+        t3 = sim3.step()
+        datatest3[counter3-1,0] = t3                                       # simulation timestep
+        datatest3[counter3-1,1] = r3.thermo.X[gas.species_index('OH')]     # OH mass fraction
+            #
+        max_OH3=0
+        IDT_mech3 = 0
+        for ii3 in range(0,counter3):
+            if datatest3[ii3,1] > max_OH3:
+                max_OH3 = datatest3[ii3,1]                                       # Maximum OH mass fraction
+                IDT_mech3 = datatest3[ii3,0]                                     # IDT  (sec)
+        #
+    sensitivities["Sens values"][m] = (IDT_mech3)/(IDT_mech)-1                   # for plot
+    sensitivities_rxr_index["Sens values"][m] = (IDT_mech3)/(IDT_mech)-1         # for exel data
+    sensitivities_rxr_index["Reaction index"][m] = m+1                           # for exel data
+    sensitivities_rxr_index["Abs sens value"][m] = abs((IDT_mech3)/(IDT_mech)-1) # for exel data
+    erros["Erros"][m] = 1-((e-(abs((IDT_mech3)/(IDT_mech)-1)))/e)
+    #
+    sens_backup_rxr_index["Sens values"][m] = (IDT_mech3)/(IDT_mech)-1           # for exel data - backup
+    sens_backup_rxr_index["Reaction index"][m] = m+1                             # for exel data - backup
+    sens_backup_rxr_index["Abs sens value"][m] = abs((IDT_mech3)/(IDT_mech)-1)   # for exel data - backup
+    #
+    # Backup excel file engine='openpyxl', 
+    with pd.ExcelWriter('backup_output_sens_'+str(index_backup)+'_'+str(Temp)+'[K]_'+str(pressure)+'[bar]_phi='+str(phi_mix)+'_Perturbation='+str(perturbation)+'_.xlsx',  mode='A') as writer:
+        sens_backup_rxr_index.to_excel(writer)
+    #
+    Counter_index_backup=m+1
+    with open('Index_backup.txt', 'w') as Indexbackup:
+        Indexbackup.write(str(Counter_index_backup))
+    Indexbackup.close()
+    print('Results of perturbation: ')
+    print('IDT_w/o_pert                 = {:10.2f} [micro-s]'.format(IDT_mech*1e6 ))
+    print('IDT_w_pert                   = {:10.2f} [micro-s]'.format(IDT_mech3*1e6))
+    print('Sens coeffient:')
+    print('IDT_w_pert/IDT_w/o_pert - 1  = {:10.5e} [--] '.format((IDT_mech3)/(IDT_mech)-1))
+    print(' ')
+    time_elapsed_m = datetime.now() - st_m 
+    print('BFSA calcutation progress = {:7.2f} %'.format(float((m+1)/gas.n_reactions)*100))
+    print(' ')
+    print('Run time for this calculation (hh:mm:ss.ms) {}'.format(time_elapsed_m))
+    print('Simulation time elapsed       (hh:mm:ss.ms) {}'.format(datetime.now() - start_time_BFSA))
+    print(' ')
+    with open('BFSA_Progress_File_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'_Perturbation='+str(perturbation)+'.txt', 'a') as Output2:
+        Output2.write('******************************************************************************\n')
+        Output2.write(' BFSA progress... \n') 
+        Output2.write(' Time and data: {}\n'.format(datetime.now()))
+        Output2.write(' -----------------------------------------------------------------------------\n')
+        Output2.write(' Results of brute-force sensitivity analysis (BFSA) ...\n')
+        Output2.write(' Perturbed reaction rxr_#{} = {} \n'.format(m+1,gas.reaction_equation(m)))
+        Output2.write(' \n')
+        Output2.write(' Sens coeffient:  {:10.5e} [--] \n'.format((IDT_mech3)/(IDT_mech)-1))
+        Output2.write(' BFSA calcutation progress = {:7.2f} %\n'.format(float((m+1)/gas.n_reactions)*100))
+        Output2.write(' Run time for this calculation (hh:mm:ss.ms) {}\n'.format(time_elapsed_m))
+        Output2.write(' Simulation time elapsed       (hh:mm:ss.ms) {}\n'.format(datetime.now() - start_time_BFSA))
+        Output2.write(' -----------------------------------------------------------------------------\n')
+        Output2.write(' \n')
+        Output2.write('******************************************************************************\n')
+    Output2.close()
+#
+    if (int(index_backup+n)==int(gas.n_reactions)):
+        break
+#    print('index_backup == gas.n_reactions primero ')
+#
+time_elapsed_BFSA = datetime.now() - start_time_BFSA
+#
+# This step is essential, otherwise the mechanism will have been altered
+gas.set_multiplier(1.0)
+#
+# Reaction mechanisms can contains thousands of elementary steps. Choose a threshold
+# to see only the top few
+threshold = 0.02
+#
+if (int(index_backup)==0):
+
+    # Write a file with all sensitivity data sorted by reaction index / number
+    sensitivities_rxr_index.to_excel('output_sens_'+str(Temp)+'[K]_'+str(pressure)+'[bar]_phi='+str(phi_mix)+'_Perturbation='+str(perturbation)+'_.xlsx')
+#
+#
+    # Write a file with all sensitivity data sorted by abs sens value, descending values
+    sensitivities_rxr_index.sort_values(by=["Abs sens value"],ascending=False).to_excel('output_sens_'+str(Temp)+'[K]_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'_SORTED_descending_DATA_FILE_Perturbation='+str(perturbation)+'_.xlsx')
+#
+#
+    # Write a file with all sensitivity data sorted by abs sens value, ascending values
+    sensitivities_rxr_index.sort_values(by=["Abs sens value"],ascending=True).to_excel('output_sens_'+str(Temp)+'[K]_'+str(pressure)+'[atm]_phi='+str(phi_mix)+'_SORTED_ascending_DATA_FILE_Perturbation='+str(perturbation)+'_.xlsx')
+#
+    plt.style.use('seaborn-whitegrid')
+    plt.rcParams['figure.autolayout'] = True
+    firstColumn = sensitivities.columns[0]
+#
+    # For plotting, collect only those steps that are above the threshold
+#
+    sensitivitiesSubset = sensitivities[sensitivities[firstColumn].abs() > threshold]
+    indicesMeetingThreshold = sensitivitiesSubset[firstColumn].abs().sort_values(ascending=False).index
+    print(' ')
+#
+    sensitivitiesSubset.mul(1).loc[indicesMeetingThreshold].plot.barh(title=' *** BRUTE-FORCE SENSITIVITY ANALYSIS ON IDT *** \n'
+            ' Solver: CANTERA {0} \n'
+            ' *** Initial Condition *** \n'
+            ' Mixture = {1},  phi = {2} \n'
+            ' pressure = {3} bar, Temperature = {4} K \n Kinetics model: {5}, Perturbation: k x {6} \n'.format(ct.__version__,Mix, phi_mix, pressure, Temp, mechanism, perturbation), legend=None, color='g')
+    print('****************************************************************************')
+    print(' ')
+    print('Brute-force sensitivity analysis has been finished...')
+    print(' ')
+    print('----------------------------------------------------------------------------')
+    print('Time elapsed for BFSA (hh:mm:ss.ms) {}'.format(time_elapsed_BFSA))
+    print('----------------------------------------------------------------------------')
+    print(' ')
+    print('****************************************************************************')
+    #
+    plt.gca().invert_yaxis()
+    plt.rcParams.update({'axes.labelsize': 10})
+    plt.xlabel(r'Sensitivity = $\frac{IDT_{with-perturbation}}{IDT_{withtout-perturbation}}-1$'); 
+    plt.savefig('Sensitivity_IDT-CVR_BFSA_Temp_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[bar]_phi='+str(phi_mix)+'_Perturbation='+str(perturbation)+'.png')
+    plt.savefig('Sensitivity_IDT-CVR_BFSA_Temp_'+str(Temp)+'[K]_Pres_'+str(pressure)+'[bar]_phi='+str(phi_mix)+'_Perturbation='+str(perturbation)+'.pdf')
+    plt.show()
+else:
+    print('****************************************************************************')
+    print(' ')
+    print('Brute-force sensitivity analysis has been finished...')
+    print(' ')
+    print('Calculation interruption(s) detected along BFSA simulation ')
+    print('----------------------------------------------------------------------------')
+    print('Time elapsed along the last set of BFSA calculations: ')
+    print('                             {}'.format(time_elapsed_BFSA))
+    print('                             (hh:mm:ss.ms) ')
+    print(' ')
+    print('****************************************************************************')
+#
+#
+# to open the workbook 
+# workbook object is created
+path = "C:\\Users\\Acer\\erros_"+str(Temp)+"[K]_"+str(pressure)+"[bar]_phi="+str(phi_mix)+"_Perturbation="+str(perturbation)+"_.xlsx"
+wb_obj = openpyxl.load_workbook(path)
+sheet_obj = wb_obj.active
+    #
+sheet_obj["H2"] = "Case 1"
+sheet_obj["H3"] = "Phi"  
+sheet_obj["H4"] = str(phi) 
+sheet_obj["H5"] = "T" 
+sheet_obj["H6"] = str(Temp) 
+sheet_obj["H7"] = "P" 
+sheet_obj["H8"] = str(pressure) 
+sheet_obj["H9"] = "Error" 
+sheet_obj["H10"] = "0,55"
+
+wb_obj.save(filename="teste.xlsx")
